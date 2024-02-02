@@ -44,6 +44,10 @@ pub enum BleId {
 }
 
 impl BleId {
+    pub fn from_name(name: &str) -> BleId {
+        BleId::Name(name.to_owned())
+    }
+
     pub fn from_mac_address(mac: &str) -> Result<BleId, Error> {
         let bdaddr = BDAddr::from_str(mac).map_err(|e| Error::InvalidParameter {
             source: Box::new(e),

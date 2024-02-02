@@ -1,5 +1,5 @@
 #[cfg(feature = "bluetooth-le")]
-use crate::connections::ble_handler::BleHandler;
+use crate::connections::ble_handler::{BleHandler, BleId};
 use crate::errors_internal::Error;
 #[cfg(feature = "bluetooth-le")]
 use futures::stream::StreamExt;
@@ -234,9 +234,7 @@ pub async fn build_tcp_stream(
 /// None
 ///
 #[cfg(feature = "bluetooth-le")]
-pub async fn build_ble_stream(
-    ble_id: &crate::connections::ble_handler::BleId,
-) -> Result<StreamHandle<DuplexStream>, Error> {
+pub async fn build_ble_stream(ble_id: &BleId) -> Result<StreamHandle<DuplexStream>, Error> {
     use crate::{
         connections::ble_handler::{AdapterEvent, RadioMessage},
         errors_internal::InternalStreamError,
