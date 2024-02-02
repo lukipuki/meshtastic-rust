@@ -44,6 +44,10 @@ pub enum BleId {
 }
 
 impl BleId {
+    pub fn from_name(name: &str) -> BleId {
+        BleId::Name(name.to_owned())
+    }
+
     pub fn from_mac_address(mac: &str) -> Result<BleId, Error> {
         let bdaddr = BDAddr::from_str(mac).map_err(|e| Error::InvalidParameter {
             source: Box::new(e),
@@ -164,7 +168,32 @@ impl BleHandler {
         ])
     }
 
-    pub async fn write_to_radio(&self, buffer: &[u8]) -> Result<(), Error> {
+    fn ble_read_error_fn(e: btleplug::Error) -> Error {
+        Error::InternalStreamError(InternalStreamError::StreamReadError {
+            source: Box::new(e),
+        })
+    }
+
+    fn parse_u32(data: Vec<u8>) -> Result<u32, Error> {
+        let data = data.as_slice().try_into().map_err(|e| {
+            Error::InternalStreamError(InternalStreamError::StreamReadError {
+                source: Box::new(e),
+            })
+        })?;
+        Ok(u32::from_le_bytes(data))
+    }
+}
+
+pub trait Ble {
+    async fn write_to_radio(&self, buffer: &[u8]) -> Result<(), Error>;
+    async fn read_from_radio(&self) -> Result<RadioMessage, Error>;
+    async fn read_fromnum(&self) -> Result<u32, Error>;
+    async fn notifications(&self) -> Result<BoxStream<u32>, Error>;
+    async fn adapter_events(&self) -> Result<BoxStream<AdapterEvent>, Error>;
+}
+
+impl Ble for BleHandler {
+    async fn write_to_radio(&self, buffer: &[u8]) -> Result<(), Error> {
         self.radio
             // TODO: remove the skipping of the first 4 bytes
             .write(&self.toradio_char, &buffer[4..], WriteType::WithResponse)
@@ -176,13 +205,7 @@ impl BleHandler {
             })
     }
 
-    fn ble_read_error_fn(e: btleplug::Error) -> Error {
-        Error::InternalStreamError(InternalStreamError::StreamReadError {
-            source: Box::new(e),
-        })
-    }
-
-    pub async fn read_from_radio(&self) -> Result<RadioMessage, Error> {
+    async fn read_from_radio(&self) -> Result<RadioMessage, Error> {
         self.radio
             .read(&self.fromradio_char)
             .await
@@ -196,16 +219,7 @@ impl BleHandler {
             })
     }
 
-    fn parse_u32(data: Vec<u8>) -> Result<u32, Error> {
-        let data = data.as_slice().try_into().map_err(|e| {
-            Error::InternalStreamError(InternalStreamError::StreamReadError {
-                source: Box::new(e),
-            })
-        })?;
-        Ok(u32::from_le_bytes(data))
-    }
-
-    pub async fn read_fromnum(&self) -> Result<u32, Error> {
+    async fn read_fromnum(&self) -> Result<u32, Error> {
         let data = self
             .radio
             .read(&self.fromnum_char)
@@ -217,7 +231,7 @@ impl BleHandler {
         Self::parse_u32(data)
     }
 
-    pub async fn notifications(&self) -> Result<BoxStream<u32>, Error> {
+    async fn notifications(&self) -> Result<BoxStream<u32>, Error> {
         self.radio
             .subscribe(&self.fromnum_char)
             .await
@@ -239,7 +253,7 @@ impl BleHandler {
         )))
     }
 
-    pub async fn adapter_events(&self) -> Result<BoxStream<AdapterEvent>, Error> {
+    async fn adapter_events(&self) -> Result<BoxStream<AdapterEvent>, Error> {
         let stream = self
             .adapter
             .events()
