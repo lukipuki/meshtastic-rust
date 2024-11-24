@@ -10,17 +10,17 @@ use meshtastic::utils;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stream_api = StreamApi::new();
 
-    println!("Enter the MAC address of a BLE device to connect to:");
+    println!("Enter the short name of a BLE device to connect to:");
 
     let stdin = io::stdin();
-    let entered_address = stdin
+    let entered_name = stdin
         .lock()
         .lines()
         .next()
         .expect("Failed to find next line")
         .expect("Could not read next line");
 
-    let ble_stream = utils::stream::build_ble_stream(entered_address).await?;
+    let ble_stream = utils::stream::build_ble_stream(entered_name).await?;
     let (mut decoded_listener, stream_api) = stream_api.connect(ble_stream).await;
 
     let config_id = utils::generate_rand_id();
