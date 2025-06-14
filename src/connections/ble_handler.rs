@@ -41,10 +41,12 @@ pub enum RadioMessage {
 
 /// Bluetooth Low Energy ID, used to filter available devices.
 pub enum BleId {
-    /// ID constructed from a name
+    /// A Meshtastic device identified by its broadcast name.
     Name(String),
-    /// ID represented from a MAC address
+    /// A Meshtastic device identified by its MAC address.
     MacAddress(BDAddr),
+    /// A Meshtastic device identified by both its broadcast name and MAC address.
+    NameAndMac(String, BDAddr),
 }
 
 impl BleId {
@@ -75,11 +77,11 @@ impl Display for BleId {
         match self {
             BleId::Name(name) => write!(f, "name={name}"),
             BleId::MacAddress(mac) => write!(f, "MAC={mac}"),
+            BleId::NameAndMac(name, mac) => write!(f, "name={name} MAC={mac}"),
         }
     }
 }
 
-#[allow(dead_code)]
 impl BleHandler {
     pub async fn new(ble_id: &BleId, scan_duration: Duration) -> Result<Self, Error> {
         let (radio, adapter) = Self::find_ble_radio(ble_id, scan_duration).await?;
@@ -111,44 +113,74 @@ impl BleHandler {
         adapter.peripherals().await
     }
 
-    /// Finds a BLE radio matching a given name and running meshtastic.
-    /// It searches for the 'MSH_SERVICE' running on the device.
+    /// Scans for nearby Meshtastic devices and returns a list of peripherals that expose the Meshtastic service.
     ///
-    /// It also returns the associated adapter that can reach this radio.
-    async fn find_ble_radio(
-        ble_id: &BleId,
+    /// This function searches for BLE devices that have the `MSH_SERVICE` UUID, which identifies them as Meshtastic devices.
+    /// For each device found, it returns a tuple containing the `Peripheral` and the `Adapter` that can be used to connect to it.
+    async fn available_peripherals(
         scan_duration: Duration,
-    ) -> Result<(Peripheral, Adapter), Error> {
-        //TODO: support searching both by a name and by a MAC address
+    ) -> Result<Vec<(Peripheral, Adapter)>, Error> {
         let scan_error_fn = |e: btleplug::Error| Error::StreamBuildError {
             source: Box::new(e),
             description: "Failed to scan for BLE devices".to_owned(),
         };
         let manager = Manager::new().await.map_err(scan_error_fn)?;
         let adapters = manager.adapters().await.map_err(scan_error_fn)?;
-
+        let mut available_peripherals = Vec::new();
         for adapter in &adapters {
             let peripherals = Self::scan_peripherals(adapter, scan_duration).await;
             match peripherals {
                 Err(e) => {
                     error!("Error while scanning for meshtastic peripherals: {e:?}");
-                    // We continue, as there can be another adapter that can work
+                    // We continue, as there can be another adapter that works
                     continue;
                 }
                 Ok(peripherals) => {
                     for peripheral in peripherals {
-                        if let Ok(Some(peripheral_properties)) = peripheral.properties().await {
-                            let matches = match ble_id {
-                                BleId::Name(name) => {
-                                    peripheral_properties.local_name.as_ref() == Some(name)
-                                }
-                                BleId::MacAddress(mac) => peripheral_properties.address == *mac,
-                            };
-                            if matches {
-                                return Ok((peripheral, adapter.clone()));
-                            }
-                        }
+                        available_peripherals.push((peripheral, adapter.clone()));
                     }
+                }
+            }
+        }
+
+        Ok(available_peripherals)
+    }
+
+    /// Returns a list of all available Meshtastic BLE devices.
+    ///
+    /// This function scans for devices that expose the Meshtastic service UUID (`6ba1b218-15a8-461f-9fa8-5dcae273eafd`)
+    /// and returns a list of `BleId`s that can be used to connect to them.
+    pub async fn available_ble_devices(scan_duration: Duration) -> Result<Vec<BleId>, Error> {
+        let peripherals = Self::available_peripherals(scan_duration).await?;
+        let mut res = Vec::new();
+        for (p, _) in &peripherals {
+            if let Ok(Some(properties)) = p.properties().await {
+                if let Some(name) = properties.local_name {
+                    res.push(BleId::Name(name));
+                }
+            }
+        }
+        Ok(res)
+    }
+
+    /// Finds a specific Meshtastic BLE radio matching the provided `BleId`.
+    ///
+    /// This function scans for available Meshtastic devices and attempts to find one that matches the given `BleId`.
+    /// If a matching device is found, it returns a tuple containing the `Peripheral` and the `Adapter` required for connection.
+    async fn find_ble_radio(
+        ble_id: &BleId,
+        scan_duration: Duration,
+    ) -> Result<(Peripheral, Adapter), Error> {
+        for (peripheral, adapter) in Self::available_peripherals(scan_duration).await? {
+            if let Ok(Some(peripheral_properties)) = peripheral.properties().await {
+                let matches = match ble_id {
+                    BleId::Name(name) => peripheral_properties.local_name.as_ref() == Some(name),
+                    BleId::MacAddress(mac) => peripheral_properties.address == *mac,
+                    //TODO: also check for the name matching
+                    BleId::NameAndMac(_, mac) => peripheral_properties.address == *mac,
+                };
+                if matches {
+                    return Ok((peripheral, adapter.clone()));
                 }
             }
         }
@@ -188,6 +220,9 @@ impl BleHandler {
         ])
     }
 
+    /// Writes a data buffer to the radio, skipping the first 4 bytes.
+    ///
+    /// The first 4 bytes of the buffer are ignored because they are not used in BLE communication.
     pub async fn write_to_radio(&self, buffer: &[u8]) -> Result<(), Error> {
         self.radio
             // TODO: remove the skipping of the first 4 bytes
@@ -206,6 +241,10 @@ impl BleHandler {
         })
     }
 
+    /// Reads the next message from the radio.
+    ///
+    /// This function reads data from the `fromradio` characteristic and returns it as a `RadioMessage`.
+    /// A `RadioMessage` can be either a `Packet` containing the data or an `Eof` marker to indicate the end of the stream.
     pub async fn read_from_radio(&self) -> Result<RadioMessage, Error> {
         self.radio
             .read(&self.fromradio_char)
@@ -229,6 +268,9 @@ impl BleHandler {
         Ok(u32::from_le_bytes(data))
     }
 
+    /// Reads a `u32` value from the `fromnum` characteristic.
+    ///
+    /// This characteristic indicates the number of packets available to be read from the `fromradio` characteristic.
     pub async fn read_fromnum(&self) -> Result<u32, Error> {
         let data = self
             .radio
@@ -241,6 +283,9 @@ impl BleHandler {
         Self::parse_u32(data)
     }
 
+    /// Returns an asynchronous stream of notifications from the `fromnum` characteristic.
+    ///
+    /// The stream contains `u32` values that indicate the number of packets available to be read.
     pub async fn notifications(&self) -> Result<BoxStream<u32>, Error> {
         self.radio
             .subscribe(&self.fromnum_char)
@@ -263,6 +308,9 @@ impl BleHandler {
         )))
     }
 
+    /// Returns a stream of `AdapterEvent`s.
+    ///
+    /// Currently, the only supported event is `Disconnected`.
     pub async fn adapter_events(&self) -> Result<BoxStream<AdapterEvent>, Error> {
         let stream = self
             .adapter
