@@ -40,6 +40,7 @@ pub enum RadioMessage {
 }
 
 /// Bluetooth Low Energy ID, used to filter available devices.
+#[derive(Debug, Clone)]
 pub enum BleId {
     /// A Meshtastic device identified by its broadcast name.
     Name(String),
