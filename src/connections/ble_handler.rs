@@ -87,7 +87,7 @@ impl Display for BleId {
 }
 
 /// A Meshtastic device discovered via Bluetooth LE.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct BleDevice {
     /// The broadcast name of the device.
     pub name: Option<String>,
