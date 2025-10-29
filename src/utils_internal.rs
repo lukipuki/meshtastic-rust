@@ -1,8 +1,6 @@
 #[cfg(feature = "bluetooth-le")]
-use crate::connections::ble_handler::BleHandler;
+use crate::connections::ble_handler::{BleDevice, BleHandler};
 use crate::errors_internal::Error;
-#[cfg(feature = "bluetooth-le")]
-use btleplug::api::BDAddr;
 #[cfg(feature = "bluetooth-le")]
 use futures::stream::StreamExt;
 use std::time::Duration;
@@ -214,23 +212,27 @@ pub async fn build_tcp_stream(
 ///
 /// # Returns
 ///
-/// A vector of Bluetooth devices identified by a MAC address and optionally also a name.
+/// A vector of [`BleDevice`]s, each identified by a MAC address and optionally also a name.
 ///
 /// # Examples
 ///
-/// ```
-/// let ble_devices = utils::available_ble_devices().await.unwrap();
-/// println!("Available Meshtastic BLE devices: {:?}", ble_devices);
-/// let stream = build_ble_stream(&ble_devices[0].1.into(), Duration::from_secs(10)).await;
+/// ```no_run
+/// use std::time::Duration;
+/// use meshtastic::utils;
+/// use meshtastic::BleId;
+///
+/// let ble_devices = utils::available_ble_devices(Duration::from_secs(5)).await?;
+/// if let Some(device) = ble_devices.first() {
+///     let stream = utils::build_ble_stream(&device.mac_address.into(), Duration::from_secs(10)).await;
+///     ...
+/// }
 /// ```
 ///
 /// # Errors
 ///
 /// Fails if the Blueetooth scan fails.
 #[cfg(feature = "bluetooth-le")]
-pub async fn available_ble_devices(
-    scan_duration: Duration,
-) -> Result<Vec<(Option<String>, BDAddr)>, Error> {
+pub async fn available_ble_devices(scan_duration: Duration) -> Result<Vec<BleDevice>, Error> {
     BleHandler::available_ble_devices(scan_duration).await
 }
 

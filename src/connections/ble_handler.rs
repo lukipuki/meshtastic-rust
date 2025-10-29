@@ -86,6 +86,14 @@ impl Display for BleId {
     }
 }
 
+/// A Meshtastic device discovered via Bluetooth LE.
+pub struct BleDevice {
+    /// The broadcast name of the device.
+    pub name: Option<String>,
+    /// The MAC address of the device.
+    pub mac_address: BDAddr,
+}
+
 impl BleHandler {
     pub async fn new(ble_id: &BleId, scan_duration: Duration) -> Result<Self, Error> {
         let (radio, adapter) = Self::find_ble_radio(ble_id, scan_duration).await?;
@@ -155,16 +163,17 @@ impl BleHandler {
     /// Returns a list of all available Meshtastic BLE devices.
     ///
     /// This function scans for devices that expose the Meshtastic service UUID
-    /// (`6ba1b218-15a8-461f-9fa8-5dcae273eafd`) and returns a list of (name, MAC address) tuples
+    /// (`6ba1b218-15a8-461f-9fa8-5dcae273eafd`) and returns a list of [`BleDevice`]s
     /// that can be used to connect to them.
-    pub async fn available_ble_devices(
-        scan_duration: Duration,
-    ) -> Result<Vec<(Option<String>, BDAddr)>, Error> {
+    pub async fn available_ble_devices(scan_duration: Duration) -> Result<Vec<BleDevice>, Error> {
         let peripherals = Self::available_peripherals(scan_duration).await?;
         let mut devices = Vec::new();
         for (p, _) in &peripherals {
             if let Ok(Some(properties)) = p.properties().await {
-                devices.push((properties.local_name, properties.address));
+                devices.push(BleDevice {
+                    name: properties.local_name,
+                    mac_address: properties.address,
+                });
             }
         }
         Ok(devices)
