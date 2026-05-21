@@ -7,7 +7,10 @@ use tokio::{
 };
 use tokio_util::{sync::CancellationToken, task::AbortOnDropHandle};
 
-use crate::{errors_internal::Error, protobufs, types::EncodedToRadioPacketWithHeader, utils};
+use crate::{
+    errors_internal::{Error, InternalStreamError},
+    protobufs, types::EncodedToRadioPacketWithHeader, utils,
+};
 use crate::{
     packet::PacketReceiver,
     utils_internal::{current_epoch_secs_u32, generate_rand_id},
@@ -619,11 +622,23 @@ impl<State> ConnectedStreamApi<State> {
             let _ = handle.await;
         }
 
-        // Note: we only return the first error.
-        read_result??;
-        write_result??;
-        processing_result??;
-        heartbeat_result??;
+        // Note: we only return the first error, and we ignore EOF errors.
+        let handle_disconnect_result = |res: Result<Result<(), Error>, tokio::task::JoinError>| -> Result<(), Error> {
+            match res {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(Error::InternalStreamError(InternalStreamError::Eof))) => {
+                    trace!("Ignored EOF error during disconnect");
+                    Ok(())
+                }
+                Ok(Err(e)) => Err(e),
+                Err(join_err) => Err(Error::JoinError(join_err)),
+            }
+        };
+
+        handle_disconnect_result(read_result)?;
+        handle_disconnect_result(write_result)?;
+        handle_disconnect_result(processing_result)?;
+        handle_disconnect_result(heartbeat_result)?;
 
         trace!("Handlers fully disconnected");
 

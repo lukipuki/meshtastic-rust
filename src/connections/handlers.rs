@@ -2,7 +2,7 @@ use crate::errors_internal::{Error, InternalChannelError, InternalStreamError};
 use crate::protobufs;
 use crate::types::EncodedToRadioPacketWithHeader;
 use crate::utils::format_data_packet;
-use log::{debug, error, trace};
+use log::{debug, error, info, trace};
 use prost::Message;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::spawn;
@@ -40,7 +40,13 @@ where
                     debug!("Read handler finished during cancellation");
                     Ok(())
                 } else {
-                    error!("Read handler unexpectedly terminated: {e:#?}");
+                    match &e {
+                        Ok(_) => debug!("Read handler finished gracefully"),
+                        Err(Error::InternalStreamError(InternalStreamError::Eof)) => {
+                            info!("Read handler reached EOF (connection closed by peer)");
+                        }
+                        Err(err) => error!("Read handler unexpectedly terminated: {err:#?}"),
+                    }
                     e
                 }
             }
@@ -79,7 +85,14 @@ where
 
             // TODO check if port has fatally errored, and if so, tell UI
             Err(e) => {
-                error!("Error reading from stream: {e:?}");
+                match e.kind() {
+                    std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset => {
+                        debug!("Stream disconnected: {e:?}");
+                    }
+                    _ => {
+                        error!("Error reading from stream: {e:?}");
+                    }
+                }
                 return Err(Error::InternalStreamError(
                     InternalStreamError::StreamReadError {
                         source: Box::new(e),
@@ -165,7 +178,7 @@ pub fn spawn_processing_handler(
                     debug!("Message processing handler finished during cancellation");
                     Ok(())
                 } else {
-                    error!("Message processing handler unexpectedly terminated");
+                    info!("Message processing handler terminated (input channel closed)");
                     Err(Error::InternalChannelError(InternalChannelError::ChannelClosedEarly {}))
                 }
             }
